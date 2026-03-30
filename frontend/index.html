@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>LicitaçõesPNCP</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    :root{--navy:#0F2240;--blue:#1A4A8A;--accent:#E8502A;--gold:#F5A623;--mint:#00B894;--bg:#F4F6FA;--card:#fff;--border:#DDE3EF;--text:#1C2B45;--muted:#7A8CA3;--r:12px;--sh:0 2px 16px rgba(15,34,64,.10)}
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+    header{background:var(--navy);padding:0 2rem;display:flex;align-items:center;justify-content:space-between;height:62px;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(0,0,0,.25)}
+    .logo{font-family:'Syne',sans-serif;font-size:1.2rem;font-weight:800;color:#fff;display:flex;align-items:center;gap:.4rem}
+    .logo span{color:var(--gold)}
+    .hright{display:flex;align-items:center;gap:1.25rem}
+    .hstat{font-size:.78rem;color:rgba(255,255,255,.6);display:flex;align-items:center;gap:.35rem}
+    .dot{width:8px;height:8px;border-radius:50%;background:#aaa;display:inline-block}.dot.on{background:var(--mint);box-shadow:0 0 6px var(--mint)}.dot.off{background:var(--accent)}
+    .layout{display:grid;grid-template-columns:280px 1fr;min-height:calc(100vh - 62px)}
+    aside{background:var(--card);border-right:1px solid var(--border);padding:1.25rem 1rem;overflow-y:auto;position:sticky;top:62px;height:calc(100vh - 62px)}
+    .stitle{font-family:'Syne',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:.85rem}
+    .fg{margin-bottom:.85rem}.fl{font-size:.76rem;font-weight:500;color:var(--muted);margin-bottom:.3rem;display:block}
+    input,select{width:100%;padding:.5rem .7rem;border:1.5px solid var(--border);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.86rem;color:var(--text);background:var(--bg);outline:none;transition:border-color .2s}
+    input:focus,select:focus{border-color:var(--blue);background:#fff}
+    .rrow{display:grid;grid-template-columns:1fr 1fr;gap:.4rem}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;padding:.55rem 1rem;border-radius:8px;border:none;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.86rem;font-weight:500;transition:all .18s;text-decoration:none}
+    .bp{background:var(--blue);color:#fff;width:100%;padding:.7rem;font-size:.9rem;font-weight:600}.bp:hover{background:#1557a0;transform:translateY(-1px)}
+    .bg2{background:transparent;color:var(--muted);width:100%;font-size:.8rem;padding:.4rem;margin-top:.2rem}.bg2:hover{background:var(--bg)}
+    .bsm{padding:.3rem .65rem;font-size:.76rem;border-radius:6px}
+    .bgr{background:var(--mint);color:#fff}.bgr:hover{background:#00a07e}
+    .bol{background:transparent;border:1.5px solid var(--border);color:var(--text)}.bol:hover{border-color:var(--blue);color:var(--blue)}
+    .bsave{background:#EBF1FB;color:var(--blue);border:1.5px solid #c5d8f5;width:100%;margin-top:.5rem;font-size:.8rem}.bsave:hover{background:#d4e5fb}
+    hr.dv{border:none;border-top:1px solid var(--border);margin:1.1rem 0}
+    .trow{display:flex;align-items:center;gap:.55rem;margin-bottom:.7rem}
+    .tog{position:relative;width:34px;height:19px;cursor:pointer}.tog input{opacity:0;width:0;height:0}
+    .tsl{position:absolute;inset:0;background:var(--border);border-radius:19px;transition:.3s}
+    .tsl::before{content:'';position:absolute;left:3px;bottom:3px;width:13px;height:13px;background:#fff;border-radius:50%;transition:.3s}
+    .tog input:checked+.tsl{background:var(--gold)}.tog input:checked+.tsl::before{transform:translateX(15px)}
+    .sfi{display:flex;align-items:center;justify-content:space-between;padding:.4rem .6rem;border-radius:7px;border:1px solid var(--border);margin-bottom:.35rem;font-size:.8rem;cursor:pointer;transition:all .15s}.sfi:hover{background:var(--bg);border-color:var(--blue)}
+    .ibox{background:#EBF1FB;border:1px solid #c5d8f5;border-radius:8px;padding:.6rem .8rem;font-size:.76rem;color:var(--blue);margin-bottom:.85rem;line-height:1.55}.ibox strong{display:block;margin-bottom:.15rem}
+    .upd{background:#E6F9F4;border:1px solid #b3edd9;border-radius:8px;padding:.5rem .75rem;font-size:.75rem;color:#00695c;margin-bottom:.85rem}
+    main{padding:1.5rem 1.75rem;overflow-y:auto}
+    .hero{background:var(--navy);border-radius:14px;padding:1.35rem;margin-bottom:1.25rem}
+    .htitle{font-family:'Syne',sans-serif;color:#fff;font-size:.95rem;font-weight:700;margin-bottom:.75rem}.htitle span{color:var(--gold)}
+    .srow{display:flex;gap:.65rem}
+    .srow input{flex:1;font-size:.95rem;padding:.7rem 1rem;border-radius:10px;border:2px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);color:#fff}
+    .srow input::placeholder{color:rgba(255,255,255,.45)}.srow input:focus{border-color:var(--gold);outline:none;background:rgba(255,255,255,.15)}
+    .bbuscar{background:var(--gold);color:var(--navy);font-weight:700;font-size:.9rem;padding:.7rem 1.5rem;border-radius:10px;border:none;cursor:pointer;font-family:'Syne',sans-serif;transition:all .18s;white-space:nowrap}.bbuscar:hover{background:#e0951f;transform:translateY(-1px)}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.85rem;margin-bottom:1.25rem}
+    .sc{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:.9rem 1.1rem;box-shadow:var(--sh)}
+    .sv{font-family:'Syne',sans-serif;font-size:1.45rem;font-weight:800;color:var(--navy);line-height:1;margin-bottom:.15rem}.sl{font-size:.73rem;color:var(--muted)}
+    .sc.gold .sv{color:var(--gold)}.sc.mint .sv{color:var(--mint)}.sc.acc .sv{color:var(--accent)}
+    .rbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem}
+    .rc{font-size:.88rem;color:var(--muted)}.rc strong{color:var(--navy);font-weight:600}
+    .list{display:flex;flex-direction:column;gap:.75rem}
+    .card{background:var(--card);border:1.5px solid var(--border);border-radius:var(--r);padding:1rem 1.15rem;box-shadow:var(--sh);transition:all .18s;position:relative}
+    .card:hover{border-color:var(--blue);box-shadow:0 4px 20px rgba(26,74,138,.13);transform:translateY(-1px)}.card.fav{border-left:4px solid var(--gold)}
+    .ch{display:flex;align-items:flex-start;justify-content:space-between;gap:.85rem;margin-bottom:.5rem}
+    .badges{display:flex;gap:.35rem;flex-wrap:wrap}
+    .badge{font-size:.7rem;font-weight:600;padding:.18rem .5rem;border-radius:20px;white-space:nowrap}
+    .bb{background:#EBF1FB;color:var(--blue)}.bo{background:#FEF0EB;color:var(--accent)}.bgn{background:#E6F9F4;color:var(--mint)}.bgr2{background:#F0F2F5;color:var(--muted)}
+    .acts{display:flex;gap:.35rem;flex-shrink:0}
+    .obj{font-size:.92rem;font-weight:500;color:var(--navy);margin-bottom:.5rem;line-height:1.4}.obj mark{background:#FFF3CD;color:var(--navy);border-radius:3px;padding:0 2px}
+    .meta{display:flex;flex-wrap:wrap;gap:.65rem;font-size:.78rem;color:var(--muted)}.mi{display:flex;align-items:center;gap:.25rem}.mi strong{color:var(--text);font-weight:500}
+    .val{font-family:'Syne',sans-serif;font-size:.95rem;font-weight:700;color:var(--mint)}
+    .pag{display:flex;align-items:center;justify-content:center;gap:.4rem;margin-top:1.75rem}
+    .pb{width:34px;height:34px;border-radius:7px;border:1.5px solid var(--border);background:var(--card);cursor:pointer;font-size:.82rem;color:var(--text);transition:all .15s;display:flex;align-items:center;justify-content:center}
+    .pb:hover{border-color:var(--blue);color:var(--blue)}.pb.act{background:var(--blue);border-color:var(--blue);color:#fff}.pb:disabled{opacity:.35;cursor:not-allowed}
+    .lov{display:none;position:fixed;inset:0;background:rgba(15,34,64,.52);z-index:999;align-items:center;justify-content:center;flex-direction:column;gap:.85rem}.lov.show{display:flex}
+    .spin{width:50px;height:50px;border:4px solid rgba(255,255,255,.2);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite}
+    .ltxt{color:#fff;font-size:.92rem;font-family:'Syne',sans-serif;text-align:center}.lsub{color:rgba(255,255,255,.55);font-size:.78rem}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .empty{text-align:center;padding:3.5rem 2rem;color:var(--muted)}.empty .ic{font-size:2.75rem;margin-bottom:.85rem}.empty h3{font-family:'Syne',sans-serif;font-size:1.05rem;color:var(--navy);margin-bottom:.4rem}
+    .mov{display:none;position:fixed;inset:0;background:rgba(15,34,64,.5);z-index:500;align-items:center;justify-content:center}.mov.show{display:flex}
+    .mo{background:var(--card);border-radius:16px;padding:1.75rem;width:90%;max-width:420px;box-shadow:0 20px 60px rgba(15,34,64,.25)}
+    .mo h3{font-family:'Syne',sans-serif;font-size:1rem;color:var(--navy);margin-bottom:1.1rem}
+    .moa{display:flex;gap:.65rem;margin-top:1.1rem}.moa .btn{flex:1}
+    .tc{position:fixed;bottom:1.25rem;right:1.25rem;z-index:1000;display:flex;flex-direction:column;gap:.4rem}
+    .toast{background:var(--navy);color:#fff;padding:.65rem 1.1rem;border-radius:9px;font-size:.85rem;box-shadow:0 4px 16px rgba(0,0,0,.22);animation:si .3s ease}
+    .toast.success{background:var(--mint)}.toast.error{background:var(--accent)}.toast.warning{background:var(--gold);color:var(--navy)}
+    @keyframes si{from{transform:translateX(80px);opacity:0}to{transform:translateX(0);opacity:1}}
+    ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+    @media(max-width:800px){.layout{grid-template-columns:1fr}aside{position:static;height:auto}.stats{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>
+<div class="lov" id="lov"><div class="spin"></div><div class="ltxt" id="ltxt">Buscando...</div><div class="lsub" id="lsub">Aguarde</div></div>
+<div class="tc" id="tc"></div>
+<div class="mov" id="mfiltro">
+  <div class="mo">
+    <h3>💾 Salvar Filtro Atual</h3>
+    <div class="fg"><label class="fl">Nome do filtro</label><input type="text" id="fnome" placeholder="Ex: Medicamentos SP — Pregão"/></div>
+    <div class="moa"><button class="btn bg2" onclick="fecharModal()">Cancelar</button><button class="btn bp" onclick="salvarFiltroAtual()">Salvar</button></div>
+  </div>
+</div>
+<header>
+  <div class="logo">🏛 Licitações<span>PNCP</span></div>
+  <div class="hright">
+    <div class="hstat"><span class="dot" id="dot"></span><span id="stxt">verificando...</span></div>
+    <div class="hstat">🕐 Atualiza todo hora automaticamente</div>
+  </div>
+</header>
+<div class="layout">
+  <aside>
+    <div class="ibox"><strong>⚡ Busca instantânea</strong>Banco atualizado todo hora com dados do PNCP. Digite e veja resultados na hora — sem espera.</div>
+    <div class="upd" id="updbox">🔄 Verificando última atualização...</div>
+    <div class="stitle">Filtros</div>
+    <div class="fg"><label class="fl">Estado (UF)</label>
+      <select id="fuf"><option value="">Todos os estados</option><option>AC</option><option>AL</option><option>AM</option><option>AP</option><option>BA</option><option>CE</option><option>DF</option><option>ES</option><option>GO</option><option>MA</option><option>MG</option><option>MS</option><option>MT</option><option>PA</option><option>PB</option><option>PE</option><option>PI</option><option>PR</option><option>RJ</option><option>RN</option><option>RO</option><option>RR</option><option>RS</option><option>SC</option><option>SE</option><option>SP</option><option>TO</option></select>
+    </div>
+    <div class="fg"><label class="fl">Modalidade</label>
+      <select id="fmod"><option value="">Todas</option><option value="Pregão - Eletrônico">Pregão - Eletrônico</option><option value="Pregão - Presencial">Pregão - Presencial</option><option value="Concorrência - Eletrônica">Concorrência - Eletrônica</option><option value="Concorrência - Presencial">Concorrência - Presencial</option><option value="Dispensa de Licitação">Dispensa de Licitação</option><option value="Inexigibilidade">Inexigibilidade</option><option value="Diálogo Competitivo">Diálogo Competitivo</option><option value="Compra Direta">Compra Direta</option></select>
+    </div>
+    <div class="fg"><label class="fl">Faixa de Valor (R$)</label><div class="rrow"><input type="number" id="fvmin" placeholder="Mín" min="0"/><input type="number" id="fvmax" placeholder="Máx" min="0"/></div></div>
+    <div class="fg"><label class="fl">Data de Publicação</label><div class="rrow"><input type="date" id="fdini"/><input type="date" id="fdfim"/></div></div>
+    <div class="trow"><label class="tog"><input type="checkbox" id="ffav" onchange="buscar()"/><span class="tsl"></span></label><span style="font-size:.83rem">Apenas favoritos ⭐</span></div>
+    <button class="btn bp" onclick="buscar()">🔍 Buscar</button>
+    <button class="btn bg2" onclick="limpar()">✕ Limpar filtros</button>
+    <hr class="dv"/>
+    <div class="stitle">Filtros Salvos</div>
+    <div id="fsalvos"><div style="font-size:.78rem;color:var(--muted);text-align:center;padding:.35rem">Nenhum filtro salvo</div></div>
+    <button class="btn bsave" onclick="abrirModal()">💾 Salvar filtro atual</button>
+  </aside>
+  <main>
+    <div class="hero">
+      <div class="htitle">🔍 Pesquisar licitações — banco atualizado a cada hora do <span>PNCP</span></div>
+      <div class="srow">
+        <input type="text" id="sk" placeholder="Palavra-chave: medicamentos, obras, limpeza, informática..." onkeydown="if(event.key==='Enter')buscar()"/>
+        <button class="bbuscar" onclick="buscar()">🔍 Buscar</button>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="sc"><div class="sv" id="stotal">—</div><div class="sl">Licitações no banco</div></div>
+      <div class="sc gold"><div class="sv" id="sfav">—</div><div class="sl">Favoritos</div></div>
+      <div class="sc mint"><div class="sv" id="sres">—</div><div class="sl">Resultados filtrados</div></div>
+      <div class="sc acc"><div class="sv" id="spncp">—</div><div class="sl">Status PNCP</div></div>
+    </div>
+    <div class="rbar">
+      <div class="rc" id="rc">Use os filtros e clique em <strong>Buscar</strong></div>
+      <button class="btn bsm bol" onclick="exportarExcel()">📥 Exportar Excel</button>
+    </div>
+    <div class="list" id="lista">
+      <div class="empty"><div class="ic">🏛</div><h3>Banco atualizado automaticamente</h3><p>Digite uma palavra-chave e clique em <strong>🔍 Buscar</strong>.<br>Resultados instantâneos do banco PostgreSQL!</p></div>
+    </div>
+    <div class="pag" id="pag"></div>
+  </main>
+</div>
+<script>
+const API='';
+const POR_PAG=50;
+let pagAtual=1,kwAtual='';
+
+document.addEventListener('DOMContentLoaded',()=>{checarStatus();carregarFiltros();buscar();});
+
+async function checarStatus(){
+  try{
+    const d=await(await fetch(`${API}/api/status`)).json();
+    const on=d.pncp_api?.online;
+    document.getElementById('dot').className='dot '+(on?'on':'off');
+    document.getElementById('stxt').textContent=on?'PNCP online':'PNCP offline';
+    document.getElementById('spncp').textContent=on?'✅ Online':'❌ Offline';
+    const s=d.banco_dados;
+    document.getElementById('stotal').textContent=fmtN(s.total_licitacoes);
+    document.getElementById('sfav').textContent=fmtN(s.total_favoritos);
+    const log=s.ultimo_log;
+    if(log){const dt=new Date(log.executado_em).toLocaleString('pt-BR');document.getElementById('updbox').textContent=`✅ Última atualização: ${dt} (+${log.total_inseridas} novas)`;}
+  }catch{document.getElementById('stxt').textContent='Verificando...';}
+}
+
+async function buscar(p=1){
+  pagAtual=p;kwAtual=document.getElementById('sk').value.trim();
+  const pm=new URLSearchParams();
+  if(kwAtual)pm.append('palavras_chave',kwAtual);
+  const uf=document.getElementById('fuf').value;if(uf)pm.append('uf',uf);
+  const mod=document.getElementById('fmod').value;if(mod)pm.append('modalidade',mod);
+  const vmin=document.getElementById('fvmin').value;if(vmin)pm.append('valor_min',vmin);
+  const vmax=document.getElementById('fvmax').value;if(vmax)pm.append('valor_max',vmax);
+  const di=document.getElementById('fdini').value;if(di)pm.append('data_inicio',di);
+  const df=document.getElementById('fdfim').value;if(df)pm.append('data_fim',df);
+  if(document.getElementById('ffav').checked)pm.append('apenas_favoritos','true');
+  pm.append('pagina',p);pm.append('por_pagina',POR_PAG);
+  loading('Buscando...','Consultando banco de dados');
+  try{
+    const res=await fetch(`${API}/api/licitacoes?${pm}`);
+    const data=await res.json();
+    document.getElementById('sres').textContent=fmtN(data.total);
+    document.getElementById('rc').innerHTML=data.total===0?'Nenhuma licitação encontrada — tente outros termos':`<strong>${fmtN(data.total)}</strong> licitações encontradas`;
+    renderLista(data.resultados||[]);renderPag(data.total_paginas,p);
+  }catch{toast('Erro ao buscar. Servidor offline?','error');}
+  finally{stopLoad();}
+}
+
+function renderLista(lista){
+  const c=document.getElementById('lista');
+  if(!lista.length){c.innerHTML=`<div class="empty"><div class="ic">🔍</div><h3>Nenhum resultado</h3><p>Tente outros termos ou amplie os filtros.</p></div>`;document.getElementById('pag').innerHTML='';return;}
+  const termos=kwAtual.toLowerCase().split(' ').filter(Boolean);
+  c.innerHTML=lista.map(l=>{
+    const nc=(l.numero_controle||'').replace(/[^a-z0-9]/gi,'-');
+    return`<div class="card ${l.favoritado?'fav':''}" id="c-${nc}">
+      <div class="ch">
+        <div class="badges">${bmod(l.modalidade)}${l.uf?`<span class="badge bgr2">📍 ${l.uf}${l.municipio?' · '+l.municipio:''}</span>`:''}${l.situacao?`<span class="badge bgn">${l.situacao}</span>`:''}</div>
+        <div class="acts">
+          <button class="btn bsm ${l.favoritado?'bgr':'bol'}" onclick="toggleFav(${l.id},'${nc}',this)">${l.favoritado?'⭐':'☆'}</button>
+          ${l.link_edital?`<a class="btn bsm bol" href="${l.link_edital}" target="_blank">🔗 Edital</a>`:''}
+        </div>
+      </div>
+      <div class="obj">${hl(l.objeto||'—',termos)}</div>
+      <div class="meta">
+        <div class="mi">🏛 <strong>${l.orgao||'Órgão não informado'}</strong></div>
+        <div class="mi">📅 Pub: <strong>${fmtD(l.data_publicacao)}</strong></div>
+        ${l.data_abertura?`<div class="mi">🗓 Abertura: <strong>${fmtD(l.data_abertura)}</strong></div>`:''}
+        <div class="mi"><span class="val">${fmtR(l.valor_estimado)}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderPag(total,pag){
+  const c=document.getElementById('pag');if(total<=1){c.innerHTML='';return;}
+  let h=`<button class="pb" onclick="buscar(${pag-1})" ${pag===1?'disabled':''}>‹</button>`;
+  for(let i=Math.max(1,pag-2);i<=Math.min(total,pag+2);i++)h+=`<button class="pb ${i===pag?'act':''}" onclick="buscar(${i})">${i}</button>`;
+  h+=`<button class="pb" onclick="buscar(${pag+1})" ${pag===total?'disabled':''}>›</button>`;
+  c.innerHTML=h;
+}
+
+async function toggleFav(id,nc,btn){
+  try{
+    const r=await fetch(`${API}/api/favoritos`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({licitacao_id:id})});
+    const d=await r.json();
+    const card=document.getElementById('c-'+nc);
+    if(d.acao==='adicionado'){btn.textContent='⭐';btn.className='btn bsm bgr';if(card)card.classList.add('fav');toast('Favoritado ⭐','success');}
+    else{btn.textContent='☆';btn.className='btn bsm bol';if(card)card.classList.remove('fav');toast('Removido dos favoritos');}
+    checarStatus();
+  }catch{toast('Erro ao favoritar','error');}
+}
+
+async function exportarExcel(){
+  const pm=new URLSearchParams();
+  const kw=document.getElementById('sk').value;if(kw)pm.append('palavras_chave',kw);
+  const uf=document.getElementById('fuf').value;if(uf)pm.append('uf',uf);
+  const mod=document.getElementById('fmod').value;if(mod)pm.append('modalidade',mod);
+  const vmin=document.getElementById('fvmin').value;if(vmin)pm.append('valor_min',vmin);
+  const vmax=document.getElementById('fvmax').value;if(vmax)pm.append('valor_max',vmax);
+  if(document.getElementById('ffav').checked)pm.append('apenas_favoritos','true');
+  loading('Gerando planilha Excel...');
+  try{
+    const res=await fetch(`${API}/api/exportar?${pm}`);
+    if(!res.ok){const e=await res.json();throw new Error(e.detail||'Erro');}
+    const blob=await res.blob();const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=`licitacoes_pncp_${new Date().toISOString().substring(0,10)}.xlsx`;a.click();URL.revokeObjectURL(url);
+    toast('✅ Excel baixado!','success');
+  }catch(e){toast('Erro: '+e.message,'error');}
+  finally{stopLoad();}
+}
+
+async function carregarFiltros(){
+  try{
+    const fs=await(await fetch(`${API}/api/filtros`)).json();
+    const c=document.getElementById('fsalvos');
+    if(!fs.length){c.innerHTML=`<div style="font-size:.78rem;color:var(--muted);text-align:center;padding:.35rem">Nenhum filtro salvo</div>`;return;}
+    c.innerHTML=fs.map(f=>`<div class="sfi" onclick='aplicarFiltro(${JSON.stringify(f).replace(/'/g,"&#39;")})'><span>📌 ${f.nome}</span><button class="btn bsm" style="padding:.12rem .38rem;color:var(--muted)" onclick="event.stopPropagation();delFiltro(${f.id})">✕</button></div>`).join('');
+  }catch{}
+}
+
+function aplicarFiltro(f){
+  document.getElementById('sk').value=f.palavras_chave||'';
+  document.getElementById('fuf').value=f.uf||'';
+  document.getElementById('fmod').value=f.modalidade||'';
+  document.getElementById('fvmin').value=f.valor_min||'';
+  document.getElementById('fvmax').value=f.valor_max||'';
+  toast(`Filtro "${f.nome}" aplicado!`,'success');buscar();
+}
+async function delFiltro(id){await fetch(`${API}/api/filtros/${id}`,{method:'DELETE'});toast('Filtro removido');carregarFiltros();}
+function limpar(){['sk','fvmin','fvmax','fdini','fdfim'].forEach(id=>document.getElementById(id).value='');document.getElementById('fuf').value='';document.getElementById('fmod').value='';document.getElementById('ffav').checked=false;buscar();}
+function abrirModal(){document.getElementById('mfiltro').classList.add('show');setTimeout(()=>document.getElementById('fnome').focus(),80);}
+function fecharModal(){document.getElementById('mfiltro').classList.remove('show');}
+async function salvarFiltroAtual(){
+  const nome=document.getElementById('fnome').value.trim();if(!nome){toast('Digite um nome','warning');return;}
+  const filtro={nome,palavras_chave:document.getElementById('sk').value,uf:document.getElementById('fuf').value,modalidade:document.getElementById('fmod').value,valor_min:parseFloat(document.getElementById('fvmin').value)||null,valor_max:parseFloat(document.getElementById('fvmax').value)||null,dias_atras:30};
+  await fetch(`${API}/api/filtros`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(filtro)});
+  fecharModal();document.getElementById('fnome').value='';toast(`"${nome}" salvo!`,'success');carregarFiltros();
+}
+document.getElementById('mfiltro').addEventListener('click',e=>{if(e.target===e.currentTarget)fecharModal();});
+function hl(txt,termos){if(!termos.length||!txt)return txt;let r=txt;termos.forEach(t=>{if(t)r=r.replace(new RegExp(`(${t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`,'gi'),'<mark>$1</mark>');});return r;}
+function bmod(m){if(!m)return'';const ml=m.toLowerCase();if(ml.includes('pregão'))return`<span class="badge bb">⚡ ${m}</span>`;if(ml.includes('dispensa')||ml.includes('inexig'))return`<span class="badge bo">🔓 ${m}</span>`;if(ml.includes('concorrência'))return`<span class="badge bb">📋 ${m}</span>`;return`<span class="badge bgr2">${m}</span>`;}
+function fmtR(v){if(!v||v===0)return'<span style="color:var(--muted)">Não informado</span>';return'R$ '+parseFloat(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fmtD(d){if(!d)return'—';try{const[y,m,dd]=d.substring(0,10).split('-');return`${dd}/${m}/${y}`;}catch{return d;}}
+function fmtN(n){return n===undefined||n===null?'—':parseInt(n).toLocaleString('pt-BR');}
+function loading(msg,sub=''){document.getElementById('ltxt').textContent=msg;document.getElementById('lsub').textContent=sub;document.getElementById('lov').classList.add('show');}
+function stopLoad(){document.getElementById('lov').classList.remove('show');}
+function toast(msg,tipo=''){const e=document.createElement('div');e.className=`toast ${tipo}`;e.textContent=msg;document.getElementById('tc').appendChild(e);setTimeout(()=>e.remove(),3500);}
+</script>
+</body>
+</html>
