@@ -1,13 +1,12 @@
 """
 backend/pncp_client.py
-Motor de Captação Viterbo - Arquitetura Refinada com Piloto Automático
-Focado em extração robusta e carga inicial automática no arranque.
+Motor de Captação Viterbo - Arquitetura Refinada
+Focado em extração robusta sem causar travamentos no servidor.
 """
 
 import requests
 from datetime import datetime, timedelta
 import time
-import threading
 
 class MotorPNCP:
     def __init__(self):
@@ -163,20 +162,3 @@ def listar_modalidades():
 
 def testar_conexao():
     return {"online": True, "mensagem": "Motor Viterbo Operacional"}
-
-# -----------------------------------------------------------------------------
-# PILOTO AUTOMÁTICO: Aciona a gravação na base de dados após o arranque
-# -----------------------------------------------------------------------------
-def _iniciar_piloto_automatico():
-    print("\n[PILOTO AUTOMÁTICO] A aguardar 15 segundos para o servidor estabilizar...")
-    time.sleep(15)
-    print("[PILOTO AUTOMÁTICO] A acionar a captação e gravação na base de dados...")
-    try:
-        # Força um pedido à própria API para disparar o processo de gravação no banco
-        requests.post("http://127.0.0.1:8080/api/varredura-manual", timeout=300)
-        print("[PILOTO AUTOMÁTICO] Gravação concluída com sucesso! Pode aceder ao site.")
-    except Exception as e:
-        print(f"[PILOTO AUTOMÁTICO] Aviso: O pedido automático falhou ({e}). A aguardar a rotina horária.")
-
-# Dispara a thread apenas uma vez, em segundo plano
-threading.Thread(target=_iniciar_piloto_automatico, daemon=True).start()
