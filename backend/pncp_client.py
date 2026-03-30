@@ -1,6 +1,6 @@
 """
 backend/pncp_client.py
-Cliente da API pública do PNCP - Versão Padrão Ouro (Ultraestável)
+Cliente da API pública do PNCP - Versão Padrão Ouro (Ultraestável + Importação Corrigida)
 """
 
 import requests
@@ -69,25 +69,41 @@ def _parse(item):
         print(f"[PNCP] Aviso: Item ignorado devido a formatação incorreta do governo: {e}")
         return None
 
-def varredura_completa(dias=1):
-    fim = datetime.now().strftime("%Y%m%d")
-    ini = (datetime.now() - timedelta(days=dias)).strftime("%Y%m%d")
-    
+def buscar_multiplas_paginas(
+    data_inicial="", data_final="", uf="",
+    modalidade_id=None, palavras_chave="",
+    max_paginas=20
+):
+    """Função restaurada para o main.py não dar erro de importação"""
+    ini = data_inicial.replace("-", "")[:8] if data_inicial else (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
+    fim = data_final.replace("-", "")[:8] if data_final else datetime.now().strftime("%Y%m%d")
+
     todas = []
     total_api = 0
-    
-    print(f"[PNCP] 🔍 Buscando fluxo geral (Estável): {ini} a {fim}")
-    
-    # 20 páginas = cerca de 1.000 licitações purificadas
-    for p in range(1, 21):
+    pags = max_paginas if not palavras_chave else max(max_paginas, 30)
+
+    base_params = {
+        "dataInicial": ini,
+        "dataFinal": fim,
+        "tamanhoPagina": 50
+    }
+    if uf:
+        base_params["uf"] = uf.upper()
+    if modalidade_id:
+        base_params["codigoModalidadeContratacao"] = modalidade_id
+
+    for p in range(1, pags + 1):
         tentativas = 3
         sucesso_na_pagina = False
 
         for tentativa in range(tentativas):
             try:
+                params = base_params.copy()
+                params["pagina"] = p
+                
                 r = requests.get(
                     f"{BASE_URL}/contratacoes/publicacao",
-                    params={"dataInicial": ini, "dataFinal": fim, "pagina": p, "tamanhoPagina": 50},
+                    params=params,
                     headers=HEADERS,
                     timeout=25
                 )
@@ -115,7 +131,7 @@ def varredura_completa(dias=1):
                 time.sleep(0.3)
                 
                 if p >= d.get("totalPaginas", 1):
-                    return {"sucesso": True, "dados": todas, "total_api": total_api}
+                    break # Fim das páginas disponíveis
                     
                 break # Sai do loop de tentativas e vai para a próxima página
                 
@@ -123,14 +139,27 @@ def varredura_completa(dias=1):
                 if tentativa < tentativas - 1:
                     time.sleep(3) # Espera 3 segundos e tenta de novo
                 else:
-                    print(f"[PNCP] ⚠️ Governo engasgou na pág {p} após {tentativas} tentativas. ({e})")
+                    print(f"[PNCP] ⚠️ Falha na pág {p} após {tentativas} tentativas. ({e})")
 
-        # Se falhou as 3 vezes na mesma página, interrompe para não travar o servidor e devolve o que já tem
         if not sucesso_na_pagina:
-            print(f"[PNCP] Interrompendo na página {p} para salvar os {len(todas)} registros já puxados.")
+            print(f"[PNCP] Interrompendo busca na página {p}.")
             break
-            
+
+    # Aplica o filtro de palavras-chave se existir
+    if palavras_chave and todas:
+        termos = palavras_chave.lower().split()
+        todas = [
+            l for l in todas
+            if all(t in (l.get("objeto") or "").lower() or t in (l.get("orgao") or "").lower() for t in termos)
+        ]
+
     return {"sucesso": True, "dados": todas, "total_api": total_api}
+
+def varredura_completa(dias=1):
+    fim = datetime.now().strftime("%Y%m%d")
+    ini = (datetime.now() - timedelta(days=dias)).strftime("%Y%m%d")
+    print(f"[PNCP] 🔍 Buscando fluxo geral (Estável): {ini} a {fim}")
+    return buscar_multiplas_paginas(data_inicial=ini, data_final=fim, max_paginas=20)
 
 def listar_modalidades():
     return [{"id": k, "nome": v} for k, v in MAPA_MODALIDADES.items()]
