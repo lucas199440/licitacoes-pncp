@@ -61,7 +61,9 @@ def iniciar_agendador():
     scheduler.start()
     print("[AGENDADOR] ✅ Agendador iniciado — varredura a cada hora")
 
-    # Roda uma vez imediatamente ao subir o servidor
-    #varredura_horaria()
+    # Em vez de travar o início, agenda a primeira busca para daqui a 10 segundos
+    from datetime import datetime, timedelta
+    run_time = datetime.now() + timedelta(seconds=10)
+    scheduler.add_job(varredura_horaria, 'date', run_date=run_time)
 
     return scheduler
