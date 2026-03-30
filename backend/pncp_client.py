@@ -1,6 +1,7 @@
 """
 backend/pncp_client.py
-Cliente da API pública do PNCP - Versão Final e Garantida
+Cliente da API pública do PNCP - Lógica Real para Captação
+Sem gambiarras: Busca os últimos 30 dias de publicação para capturar editais que ainda vão abrir.
 """
 
 import requests
@@ -13,7 +14,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 }
 
-# Tradução OBRIGATÓRIA para o filtro funcionar
+# Tradução OBRIGATÓRIA para o filtro funcionar de forma exata na tela
 MAPA_MODALIDADES = {
     8:  "Pregão - Eletrônico",
     9:  "Pregão - Presencial",
@@ -61,19 +62,22 @@ def _parse(item):
     except:
         return None
 
-def buscar_multiplas_paginas(data_inicial="", data_final="", uf="", modalidade_id=None, palavras_chave="", max_paginas=3):
-    # Força a busca dos últimos 15 dias para garantir que nunca falte dado
-    ini = data_inicial.replace("-", "")[:8] if data_inicial else (datetime.now() - timedelta(days=15)).strftime("%Y%m%d")
-    fim = data_final.replace("-", "")[:8] if data_final else datetime.now().strftime("%Y%m%d")
+def buscar_multiplas_paginas(data_inicial="", data_final="", uf="", modalidade_id=None, palavras_chave="", max_paginas=10):
+    # LÓGICA DE CAPTAÇÃO REAL: Data do sistema.
+    hoje = datetime.now()
+    
+    # Voltamos 30 dias na publicação para garantir que pegamos editais que AINDA VÃO ABRIR
+    ini = data_inicial.replace("-", "")[:8] if data_inicial else (hoje - timedelta(days=30)).strftime("%Y%m%d")
+    fim = data_final.replace("-", "")[:8] if data_final else hoje.strftime("%Y%m%d")
+
+    print(f"[PNCP] ⏳ Captação iniciada: Publicações de {ini} a {fim} ...")
 
     todas = []
     total_api = 0
 
-    # Puxa só as principais se for automático
-    mods_to_fetch = [int(modalidade_id)] if modalidade_id else [8, 10, 4, 11, 5, 9, 2, 13]
+    mods_to_fetch = [int(modalidade_id)] if modalidade_id else list(MAPA_MODALIDADES.keys())
 
     for mod in mods_to_fetch:
-        print(f"[PNCP] Baixando Modalidade ID {mod}...")
         for p in range(1, max_paginas + 1):
             try:
                 r = requests.get(
@@ -83,7 +87,7 @@ def buscar_multiplas_paginas(data_inicial="", data_final="", uf="", modalidade_i
                     timeout=30
                 )
                 if r.status_code == 204:
-                    break # Sem dados para essa modalidade, pula pra próxima
+                    break # PNCP não tem mais dados para esta modalidade, pula para a próxima de forma limpa
                 
                 r.raise_for_status()
                 d = r.json()
@@ -103,8 +107,8 @@ def buscar_multiplas_paginas(data_inicial="", data_final="", uf="", modalidade_i
                 if p >= d.get("totalPaginas", 1):
                     break
             except Exception as e:
-                print(f"[PNCP] Timeout na mod {mod}. Pulando para não travar o servidor.")
-                break # Falhou, pula pra próxima sem cair
+                print(f"[PNCP] Erro ou lentidão na modalidade {mod}. Seguindo para a próxima.")
+                break # Segue a vida sem derrubar seu site
             
             time.sleep(0.5)
 
@@ -114,11 +118,9 @@ def buscar_multiplas_paginas(data_inicial="", data_final="", uf="", modalidade_i
 
     return {"sucesso": True, "dados": todas, "total_api": total_api}
 
-def varredura_completa(dias=15):
-    # MUDANÇA CRUCIAL: 15 dias de garantia de dados!
-    fim = datetime.now().strftime("%Y%m%d")
-    ini = (datetime.now() - timedelta(days=dias)).strftime("%Y%m%d")
-    return buscar_multiplas_paginas(data_inicial=ini, data_final=fim, max_paginas=3)
+def varredura_completa(dias=30):
+    # Padrão de captação: últimos 30 dias varrendo até 10 páginas (500 itens) por modalidade
+    return buscar_multiplas_paginas(max_paginas=10)
 
 def listar_modalidades():
     return [{"id": k, "nome": v} for k, v in MAPA_MODALIDADES.items()]
