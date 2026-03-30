@@ -1,7 +1,7 @@
 """
 backend/main.py
 Servidor FastAPI para produção (Railway + Supabase).
-Com Sincronização Automática em Background.
+Sincronização Direta Integrada (Sem dependência de Agendadores externos).
 """
 
 import sys, os
@@ -22,7 +22,6 @@ from database.db import (
     toggle_favorito, salvar_filtro, listar_filtros_salvos,
     deletar_filtro, estatisticas_db
 )
-from backend.pncp_client import buscar_multiplas_paginas, listar_modalidades, testar_conexao
 from backend.exportador import exportar_excel
 
 app = FastAPI(title="Licitações PNCP", version="2.0.0")
@@ -33,28 +32,32 @@ app.add_middleware(
 )
 
 def varredura_startup_silenciosa():
-    """Roda em segundo plano para encher o banco sem travar a tela do usuário"""
-    print("[AUTO-SYNC] Aguardando 10s para o servidor estabilizar...")
-    time.sleep(10)
-    print("[AUTO-SYNC] Iniciando primeira captura de dados em background...")
+    """Ignora o agendador. Faz a extração e salvamento de forma DIRETA no arranque."""
+    print("[AUTO-SYNC] Aguardando 5s para o servidor estabilizar...")
+    time.sleep(5)
     try:
-        from backend.agendador import varredura_horaria
-        varredura_horaria()
-        print("[AUTO-SYNC] Banco preenchido com sucesso! O sistema está pronto.")
+        from backend.pncp_client import varredura_completa
+        print("[AUTO-SYNC] A extrair dados do PNCP de forma direta...")
+        resultado = varredura_completa(15)
+        dados = resultado.get("dados", [])
+        
+        if dados:
+            print(f"[AUTO-SYNC] {len(dados)} licitações capturadas. A gravar no banco de dados...")
+            stats = salvar_licitacoes(dados)
+            print(f"[AUTO-SYNC] Sucesso! Banco atualizado: {stats}")
+        else:
+            print("[AUTO-SYNC] ⚠️ Falha: O PNCP não devolveu nenhuma licitação.")
     except Exception as e:
-        print(f"[AUTO-SYNC] Erro: {e}")
+        print(f"[AUTO-SYNC] ❌ Erro fatal no processo de sincronização: {e}")
 
-# Inicializa banco e agendador ao subir
+# Inicializa banco e varredura ao subir
 @app.on_event("startup")
 async def startup():
     try:
         init_db()
-        from backend.agendador import iniciar_agendador
-        iniciar_agendador()
-        print("[APP] Sistema iniciado com sucesso!")
-        
-        # Dispara a busca num thread isolado (Zero travamento no frontend)
+        # Inicia a captura imediatamente em segundo plano sem travar o site
         threading.Thread(target=varredura_startup_silenciosa, daemon=True).start()
+        print("[APP] Sistema iniciado com sucesso!")
     except Exception as e:
         print(f"[APP] Erro no startup: {e}")
 
@@ -88,24 +91,48 @@ class BuscaRequest(BaseModel):
     pagina: Optional[int] = 1
     por_pagina: Optional[int] = 50
 
+# ── ROTA DE EMERGÊNCIA (O TESTE DA VERDADE) ──────────────────────────────────
+@app.get("/api/emergencia")
+async def emergencia_db():
+    """
+    Quando aceder a esta rota pelo navegador, o sistema força a captação
+    e exibe EXATAMENTE o que está a correr mal na tela.
+    """
+    try:
+        from backend.pncp_client import buscar_multiplas_paginas
+        
+        # 1. Puxa só as primeiras páginas para ser rápido
+        res_api = buscar_multiplas_paginas(max_paginas=2)
+        dados = res_api.get("dados", [])
+        
+        if not dados:
+            return {
+                "STATUS": "ERRO_GOVERNO", 
+                "MOTIVO": "O código chegou ao PNCP, mas o Governo devolveu ZERO resultados. É provável que o IP do Railway esteja bloqueado pelo WAF do PNCP."
+            }
+            
+        # 2. Grava no banco
+        res_banco = salvar_licitacoes(dados)
+        
+        # 3. Lê do banco
+        estatisticas = estatisticas_db()
+        
+        return {
+            "STATUS": "SUCESSO_TOTAL",
+            "LICITACOES_BAIXADAS_AGORA": len(dados),
+            "RESULTADO_GRAVACAO_SUPABASE": res_banco,
+            "TOTAL_NA_BASE_DE_DADOS": estatisticas.get("total_licitacoes")
+        }
+    except Exception as e:
+        return {"STATUS": "ERRO_NO_CODIGO", "DETALHE": str(e)}
+
 # ── Frontend ──────────────────────────────────────────────────────────────────
 @app.get("/", response_class=FileResponse)
 async def serve_frontend():
     p = os.path.join(frontend_path, "index.html")
     return FileResponse(p) if os.path.exists(p) else JSONResponse({"ok": True})
 
-# ── Status ────────────────────────────────────────────────────────────────────
-@app.get("/api/status")
-async def status():
-    return {
-        "sistema": "online",
-        "versao": "2.0.0",
-        "pncp_api": testar_conexao(),
-        "banco_dados": estatisticas_db(),
-        "timestamp": datetime.now().isoformat(),
-    }
-
-# ── Busca no banco local (rápida — PostgreSQL com full-text) ──────────────────
+# ── Busca no banco local (rápida — PostgreSQL) ────────────────────────────────
 @app.get("/api/licitacoes")
 async def listar_licitacoes(
     palavras_chave: str = Query(""),
@@ -119,7 +146,12 @@ async def listar_licitacoes(
     pagina: int = Query(1, ge=1),
     por_pagina: int = Query(50, ge=1, le=200),
 ):
-    """Busca no banco PostgreSQL — resultado instantâneo."""
+    # ESCUDO CONTRA O BUG DE 2026: Ignora datas futuras vindas do frontend
+    if data_inicio and data_inicio.startswith("2026"):
+        data_inicio = ""
+    if data_fim and data_fim.startswith("2026"):
+        data_fim = ""
+
     return buscar_licitacoes(
         palavras_chave=palavras_chave, uf=uf, modalidade=modalidade,
         valor_min=valor_min, valor_max=valor_max,
@@ -128,10 +160,10 @@ async def listar_licitacoes(
         pagina=pagina, por_pagina=por_pagina,
     )
 
-# ── Busca ao vivo no PNCP (quando usuário quer dados frescos) ─────────────────
+# ── Busca ao vivo ─────────────────────────────────────────────────────────────
 @app.post("/api/buscar-pncp")
 async def buscar_pncp_live(req: BuscaRequest):
-    """Busca diretamente na API do PNCP e salva resultados no banco."""
+    from backend.pncp_client import buscar_multiplas_paginas
     from datetime import timedelta
     fim = datetime.now()
     ini = fim - timedelta(days=req.dias_atras or 30)
@@ -145,13 +177,8 @@ async def buscar_pncp_live(req: BuscaRequest):
         max_paginas=5 if not req.palavras_chave else 15,
     )
 
-    if not resultado.get("sucesso"):
-        raise HTTPException(status_code=502, detail="Erro ao consultar API do PNCP")
-
     licitacoes = resultado.get("dados", [])
-    salvas = {}
-    if licitacoes:
-        salvas = salvar_licitacoes(licitacoes)
+    salvas = salvar_licitacoes(licitacoes) if licitacoes else {}
 
     return {
         "sucesso": True,
@@ -160,38 +187,42 @@ async def buscar_pncp_live(req: BuscaRequest):
         "licitacoes": licitacoes,
     }
 
-# ── Exportar Excel ────────────────────────────────────────────────────────────
+# ── Varredura Manual (Ignora o Agendador Antigo) ──────────────────────────────
+@app.post("/api/varredura-manual")
+async def varredura_manual():
+    """Dispara uma varredura manual DIRETA."""
+    try:
+        from backend.pncp_client import varredura_completa
+        res = varredura_completa(15)
+        dados = res.get("dados", [])
+        if dados:
+            salvar_licitacoes(dados)
+        return {"sucesso": True, "baixadas": len(dados)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Outras Rotas ──────────────────────────────────────────────────────────────
 @app.get("/api/exportar")
 async def exportar(
-    palavras_chave: str = Query(""),
-    uf: str = Query(""),
-    modalidade: str = Query(""),
-    valor_min: Optional[float] = Query(None),
-    valor_max: Optional[float] = Query(None),
+    palavras_chave: str = Query(""), uf: str = Query(""), modalidade: str = Query(""),
+    valor_min: Optional[float] = Query(None), valor_max: Optional[float] = Query(None),
     apenas_favoritos: bool = Query(False),
 ):
     resultado = buscar_licitacoes(
         palavras_chave=palavras_chave, uf=uf, modalidade=modalidade,
-        valor_min=valor_min, valor_max=valor_max,
-        apenas_favoritos=apenas_favoritos,
+        valor_min=valor_min, valor_max=valor_max, apenas_favoritos=apenas_favoritos,
         pagina=1, por_pagina=10000,
     )
     licitacoes = resultado.get("resultados", [])
     if not licitacoes:
         raise HTTPException(status_code=404, detail="Nenhuma licitação para exportar.")
     caminho = exportar_excel(licitacoes)
-    return FileResponse(
-        path=caminho,
-        filename=os.path.basename(caminho),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    return FileResponse(path=caminho, filename=os.path.basename(caminho), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# ── Favoritos ─────────────────────────────────────────────────────────────────
 @app.post("/api/favoritos")
 async def gerenciar_favorito(req: FavoritoRequest):
     return toggle_favorito(req.licitacao_id, req.nota)
 
-# ── Filtros Salvos ────────────────────────────────────────────────────────────
 @app.get("/api/filtros")
 async def listar_filtros():
     return listar_filtros_salvos()
@@ -205,21 +236,20 @@ async def remover_filtro(filtro_id: int):
     deletar_filtro(filtro_id)
     return {"sucesso": True}
 
-# ── Utilitários ───────────────────────────────────────────────────────────────
 @app.get("/api/modalidades")
 async def modalidades():
+    from backend.pncp_client import listar_modalidades
     return listar_modalidades()
 
 @app.get("/api/estatisticas")
 async def estatisticas():
     return estatisticas_db()
 
-@app.post("/api/varredura-manual")
-async def varredura_manual():
-    """Dispara uma varredura manual do PNCP."""
-    try:
-        from backend.agendador import varredura_horaria
-        varredura_horaria()
-        return {"sucesso": True, "mensagem": "Varredura iniciada"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/api/status")
+async def status():
+    from backend.pncp_client import testar_conexao
+    return {
+        "sistema": "online",
+        "pncp_api": testar_conexao(),
+        "banco_dados": estatisticas_db(),
+    }
