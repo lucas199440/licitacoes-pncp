@@ -1,7 +1,7 @@
 """
 database/db.py
 Banco de dados PostgreSQL via Supabase.
-Compatível com Railway + Supabase gratuito.
+Arquitetura Blindada com Savepoints (Proteção contra dados corrompidos).
 """
 
 import os
@@ -11,10 +11,8 @@ from datetime import datetime
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
-
 def get_conn():
     return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
-
 
 def init_db():
     """Cria as tabelas se não existirem."""
@@ -87,9 +85,8 @@ def init_db():
     conn.close()
     print("[DB] Banco PostgreSQL inicializado.")
 
-
 def salvar_licitacoes(licitacoes: list) -> dict:
-    """Upsert de licitações no banco."""
+    """Upsert blindado de licitações no banco. Usa Savepoints para evitar que 1 erro quebre o lote inteiro."""
     conn = get_conn()
     cur = conn.cursor()
     inseridas = 0
@@ -97,46 +94,53 @@ def salvar_licitacoes(licitacoes: list) -> dict:
     agora = datetime.now().isoformat()
 
     for l in licitacoes:
-        nc = l.get("numero_controle")
-        if not nc:
-            continue
-        cur.execute("SELECT id FROM licitacoes WHERE numero_controle = %s", (nc,))
-        existe = cur.fetchone()
+        try:
+            cur.execute("SAVEPOINT sp_edital")
+            nc = l.get("numero_controle")
+            if not nc:
+                continue
+                
+            cur.execute("SELECT id FROM licitacoes WHERE numero_controle = %s", (nc,))
+            existe = cur.fetchone()
 
-        if existe:
-            cur.execute("""
-                UPDATE licitacoes SET
-                    objeto=%s, orgao=%s, uf=%s, municipio=%s, modalidade=%s,
-                    situacao=%s, data_publicacao=%s, data_abertura=%s,
-                    valor_estimado=%s, link_edital=%s, atualizado_em=%s
-                WHERE numero_controle=%s
-            """, (
-                l.get("objeto"), l.get("orgao"), l.get("uf"), l.get("municipio"),
-                l.get("modalidade"), l.get("situacao"), l.get("data_publicacao"),
-                l.get("data_abertura"), l.get("valor_estimado"), l.get("link_edital"),
-                agora, nc
-            ))
-            atualizadas += 1
-        else:
-            cur.execute("""
-                INSERT INTO licitacoes (numero_controle, numero_edital, objeto, orgao, uf,
-                    municipio, modalidade, situacao, data_publicacao, data_abertura,
-                    valor_estimado, link_edital, cnpj_orgao, ano, sequencial, criado_em, atualizado_em)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (
-                nc, l.get("numero_edital"), l.get("objeto"), l.get("orgao"),
-                l.get("uf"), l.get("municipio"), l.get("modalidade"), l.get("situacao"),
-                l.get("data_publicacao"), l.get("data_abertura"), l.get("valor_estimado"),
-                l.get("link_edital"), l.get("cnpj_orgao"), l.get("ano"), l.get("sequencial"),
-                agora, agora
-            ))
-            inseridas += 1
+            if existe:
+                cur.execute("""
+                    UPDATE licitacoes SET
+                        objeto=%s, orgao=%s, uf=%s, municipio=%s, modalidade=%s,
+                        situacao=%s, data_publicacao=%s, data_abertura=%s,
+                        valor_estimado=%s, link_edital=%s, atualizado_em=%s
+                    WHERE numero_controle=%s
+                """, (
+                    l.get("objeto"), l.get("orgao"), l.get("uf"), l.get("municipio"),
+                    l.get("modalidade"), l.get("situacao"), l.get("data_publicacao"),
+                    l.get("data_abertura"), l.get("valor_estimado"), l.get("link_edital"),
+                    agora, nc
+                ))
+                atualizadas += 1
+            else:
+                cur.execute("""
+                    INSERT INTO licitacoes (numero_controle, numero_edital, objeto, orgao, uf,
+                        municipio, modalidade, situacao, data_publicacao, data_abertura,
+                        valor_estimado, link_edital, cnpj_orgao, ano, sequencial, criado_em, atualizado_em)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    nc, l.get("numero_edital"), l.get("objeto"), l.get("orgao"),
+                    l.get("uf"), l.get("municipio"), l.get("modalidade"), l.get("situacao"),
+                    l.get("data_publicacao"), l.get("data_abertura"), l.get("valor_estimado"),
+                    l.get("link_edital"), l.get("cnpj_orgao"), l.get("ano"), l.get("sequencial"),
+                    agora, agora
+                ))
+                inseridas += 1
+                
+            cur.execute("RELEASE SAVEPOINT sp_edital")
+        except Exception as e:
+            cur.execute("ROLLBACK TO SAVEPOINT sp_edital")
+            print(f"[DB ERRO] Dados malformados ignorados para {l.get('numero_controle', 'Desconhecido')}: {e}")
 
     conn.commit()
     cur.close()
     conn.close()
     return {"inseridas": inseridas, "atualizadas": atualizadas}
-
 
 def buscar_licitacoes(
     palavras_chave="", uf="", modalidade="",
@@ -155,7 +159,6 @@ def buscar_licitacoes(
     if apenas_favoritos:
         conditions.append("l.id IN (SELECT licitacao_id FROM favoritos)")
 
-    # Full-text search em português (PostgreSQL nativo — muito mais rápido)
     if palavras_chave:
         conditions.append(
             "to_tsvector('portuguese', COALESCE(l.objeto,'') || ' ' || COALESCE(l.orgao,'')) "
@@ -216,7 +219,6 @@ def buscar_licitacoes(
         "resultados": resultados,
     }
 
-
 def toggle_favorito(licitacao_id: int, nota: str = "") -> dict:
     conn = get_conn()
     cur = conn.cursor()
@@ -232,7 +234,6 @@ def toggle_favorito(licitacao_id: int, nota: str = "") -> dict:
     cur.close()
     conn.close()
     return {"acao": acao, "licitacao_id": licitacao_id}
-
 
 def salvar_filtro(nome: str, filtros: dict) -> dict:
     conn = get_conn()
@@ -251,7 +252,6 @@ def salvar_filtro(nome: str, filtros: dict) -> dict:
     conn.close()
     return {"id": fid, "nome": nome}
 
-
 def listar_filtros_salvos() -> list:
     conn = get_conn()
     cur = conn.cursor()
@@ -261,7 +261,6 @@ def listar_filtros_salvos() -> list:
     conn.close()
     return rows
 
-
 def deletar_filtro(filtro_id: int):
     conn = get_conn()
     cur = conn.cursor()
@@ -269,7 +268,6 @@ def deletar_filtro(filtro_id: int):
     conn.commit()
     cur.close()
     conn.close()
-
 
 def estatisticas_db() -> dict:
     conn = get_conn()
@@ -296,7 +294,6 @@ def estatisticas_db() -> dict:
         "por_uf": por_uf,
         "ultimo_log": dict(ultimo_log) if ultimo_log else None,
     }
-
 
 def registrar_log(inseridas: int, atualizadas: int):
     try:
