@@ -1,6 +1,6 @@
 """
 backend/pncp_client.py
-Cliente da API pública do PNCP com sistema anti-falhas e retentativas automáticas.
+Cliente da API pública do PNCP com busca de fluxo geral (trazendo TODAS as modalidades juntas).
 """
 
 import requests
@@ -13,7 +13,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 }
 
-# Todas as modalidades de licitação
+# Usado apenas para o filtro do frontend e fallback de nomes
 MODALIDADES_LICITACAO = {
     8:  "Pregão - Eletrônico",
     9:  "Pregão - Presencial",
@@ -23,6 +23,10 @@ MODALIDADES_LICITACAO = {
     11: "Inexigibilidade",
     2:  "Diálogo Competitivo",
     13: "Compra Direta",
+    1:  "Leilão",
+    3:  "Concurso",
+    6:  "Manifestação de Interesse",
+    7:  "Pré-qualificação"
 }
 
 def _fmt_data(d):
@@ -58,22 +62,24 @@ def _parse(item):
         "sequencial":      int(seq) if str(seq).isdigit() else None,
     }
 
-def _buscar_pagina(mod_id, data_ini, data_fim, uf="", pagina=1):
+def _buscar_pagina(data_ini, data_fim, uf="", mod_id=None, pagina=1):
+    # Parâmetros base: puxa tudo o que foi publicado nas datas informadas
     params = {
         "dataInicial": data_ini,
         "dataFinal":   data_fim,
-        "codigoModalidadeContratacao": mod_id,
         "pagina":      pagina,
         "tamanhoPagina": 50,
     }
+    
+    # Se o usuário escolheu uma modalidade específica no filtro, nós aplicamos
+    if mod_id:
+        params["codigoModalidadeContratacao"] = mod_id
     if uf:
         params["uf"] = uf.upper()
 
-    # SISTEMA ANTI-FALHA: Tenta até 4 vezes com tempo de espera crescente se o PNCP estiver lento
     tentativas = 4
     for tentativa in range(tentativas):
         try:
-            # Aumentado o timeout de 30 para 60 segundos (Pregão Eletrônico é pesado pro governo)
             r = requests.get(f"{BASE_URL}/contratacoes/publicacao", params=params, headers=HEADERS, timeout=60)
             if r.status_code == 204:
                 return {"dados": [], "total_paginas": 0, "total_registros": 0}
@@ -86,52 +92,52 @@ def _buscar_pagina(mod_id, data_ini, data_fim, uf="", pagina=1):
             }
         except Exception as e:
             if tentativa < tentativas - 1:
-                espera = (tentativa + 1) * 3  # Espera 3s, depois 6s, depois 9s
-                print(f"[PNCP] Lentidão no governo (Mod {mod_id} - Pág {pagina}). Tentando novamente em {espera}s... ({e})")
+                espera = (tentativa + 1) * 3
+                print(f"[PNCP] Lentidão no governo (Pág {pagina}). Tentando em {espera}s... ({e})")
                 time.sleep(espera)
             else:
-                print(f"[PNCP] ❌ Falha definitiva após {tentativas} tentativas (Mod {mod_id} - Pág {pagina}): {e}")
+                print(f"[PNCP] ❌ Falha definitiva na página {pagina}: {e}")
     
     return {"dados": [], "total_paginas": 1, "total_registros": 0, "erro": True}
 
 def buscar_multiplas_paginas(
     data_inicial="", data_final="", uf="",
     modalidade_id=None, palavras_chave="",
-    max_paginas=15, # Busca até 750 registros por modalidade por padrão
+    max_paginas=50, # Aumentamos para 50 páginas (2.500 licitações) num único fluxo
 ):
     ini = _fmt_data(data_inicial) or (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
     fim = _fmt_data(data_final)   or datetime.now().strftime("%Y%m%d")
 
-    mods = [int(modalidade_id)] if modalidade_id else list(MODALIDADES_LICITACAO.keys())
-    pags = max_paginas if not palavras_chave else max(max_paginas, 25)
-
     todas = []
     total_api = 0
+    pags = max_paginas if not palavras_chave else max(max_paginas, 60)
 
-    for mod in mods:
-        nome = MODALIDADES_LICITACAO.get(mod, str(mod))
-        print(f"[PNCP] 🔍 Buscando: {nome} | {ini}→{fim}")
+    # Verifica se estamos buscando o fluxo geral ou apenas uma modalidade específica pedida pelo filtro
+    tipo_busca = MODALIDADES_LICITACAO.get(int(modalidade_id), "Todas as Modalidades") if modalidade_id else "TODAS AS MODALIDADES MISTURADAS"
+    print(f"[PNCP] 🔍 Iniciando extração: {tipo_busca} | {ini}→{fim}")
+    
+    # Loop único: avança as páginas pegando tudo o que o governo tiver na ordem de publicação
+    for p in range(1, pags + 1):
+        res = _buscar_pagina(data_ini=ini, data_fim=fim, uf=uf, mod_id=modalidade_id, pagina=p)
         
-        for p in range(1, pags + 1):
-            res = _buscar_pagina(mod, ini, fim, uf, p)
+        if res.get("erro"):
+            print(f"[PNCP] ⚠️ Instabilidade no portal na página {p}. Interrompendo busca para salvar o que já foi baixado.")
+            break 
             
-            if res.get("erro"):
-                print(f"[PNCP] Pulando restante da modalidade {nome} por instabilidade grave do portal.")
-                break 
-                
-            dados = res.get("dados", [])
-            if not dados:
-                break 
-                
-            todas.extend(dados)
-            if p == 1:
-                total_api += res.get("total_registros", 0)
-                
-            time.sleep(0.5) 
+        dados = res.get("dados", [])
+        if not dados:
+            break 
             
-            if p >= res.get("total_paginas", 1):
-                break
+        todas.extend(dados)
+        if p == 1:
+            total_api += res.get("total_registros", 0)
+            
+        time.sleep(0.5) # Pausa rápida para não ser bloqueado pelo governo
+        
+        if p >= res.get("total_paginas", 1):
+            break
 
+    # Filtro local de palavras-chave
     if palavras_chave and todas:
         termos = palavras_chave.lower().split()
         todas  = [
@@ -148,15 +154,16 @@ def buscar_multiplas_paginas(
 def varredura_completa(dias=1):
     fim = datetime.now().strftime("%Y%m%d")
     ini = (datetime.now() - timedelta(days=dias)).strftime("%Y%m%d")
-    # Aumentado para 20 páginas (1.000 licitações) POR modalidade na varredura automática
-    return buscar_multiplas_paginas(data_inicial=ini, data_final=fim, max_paginas=20)
+    # Traz as últimas 50 páginas (cerca de 2.500 licitações) do fluxo geral do dia
+    return buscar_multiplas_paginas(data_inicial=ini, data_final=fim, max_paginas=50)
 
 def listar_modalidades():
     return [{"id": k, "nome": v} for k, v in MODALIDADES_LICITACAO.items()]
 
 def testar_conexao():
     try:
-        r = requests.get(f"{BASE_URL}/contratacoes/publicacao", params={"dataInicial": datetime.now().strftime("%Y%m%d"), "dataFinal": datetime.now().strftime("%Y%m%d"), "codigoModalidadeContratacao": 8, "pagina": 1, "tamanhoPagina": 1}, headers=HEADERS, timeout=10)
+        # Ping simples no portal sem forçar modalidades
+        r = requests.get(f"{BASE_URL}/contratacoes/publicacao", params={"dataInicial": datetime.now().strftime("%Y%m%d"), "dataFinal": datetime.now().strftime("%Y%m%d"), "pagina": 1, "tamanhoPagina": 1}, headers=HEADERS, timeout=10)
         return {"online": r.status_code in (200, 204), "mensagem": f"Status {r.status_code}"}
     except Exception as e:
         return {"online": False, "mensagem": str(e)}
