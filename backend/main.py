@@ -1,11 +1,10 @@
+cat > /home/claude/licitacao-online/backend/main.py << 'PYEOF'
 """
 backend/main.py
 Servidor FastAPI para produção (Railway + Supabase).
-Sincronização Direta com Correção Temporal (Fix para o bug de 2026).
 """
 
 import sys, os
-# Garante que o diretório raiz está no path para as importações funcionarem
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI, Query, HTTPException
@@ -17,19 +16,16 @@ from typing import Optional
 from datetime import datetime, timedelta
 import threading
 import time
-import requests
 
-# Importações do Banco de Dados
 from database.db import (
     init_db, salvar_licitacoes, buscar_licitacoes,
     toggle_favorito, salvar_filtro, listar_filtros_salvos,
-    deletar_filtro, estatisticas_db, get_conn
+    deletar_filtro, estatisticas_db
 )
 from backend.exportador import exportar_excel
 
-app = FastAPI(title="Licitações PNCP", version="2.0.1")
+app = FastAPI(title="Licitações PNCP", version="2.0.2")
 
-# Habilita CORS para evitar bloqueios de navegador
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,56 +34,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def obter_data_corrigida():
-    """Corrige o bug de 2026: Se o ano for futuro, retorna o ano de 2024."""
-    agora = datetime.now()
-    if agora.year > 2024:
-        try:
-            return agora.replace(year=2024)
-        except ValueError:
-            # Tratamento para anos bissextos (29 de fevereiro)
-            return agora - timedelta(days=365 * (agora.year - 2024))
-    return agora
-
-def varredura_startup_silenciosa():
-    """Faz a extração inicial corrigindo o ano em segundo plano."""
-    print("[AUTO-SYNC] Aguardando 15s para estabilização total do servidor...")
+def varredura_startup():
+    """Busca licitações dos últimos 30 dias ao iniciar o servidor."""
+    print("[AUTO-SYNC] Aguardando 15s para estabilização...")
     time.sleep(15)
     try:
         from backend.pncp_client import buscar_multiplas_paginas
-        data_ref = obter_data_corrigida()
-        ini = (data_ref - timedelta(days=30)).strftime("%Y-%m-%d")
-        fim = data_ref.strftime("%Y-%m-%d")
-        
-        print(f"[AUTO-SYNC] Capturando dados reais (Ano Base: {data_ref.year})...")
+        # USA A DATA ATUAL CORRETA (2026)
+        hoje = datetime.now()
+        ini = (hoje - timedelta(days=30)).strftime("%Y-%m-%d")
+        fim = hoje.strftime("%Y-%m-%d")
+        print(f"[AUTO-SYNC] Buscando de {ini} até {fim}...")
         resultado = buscar_multiplas_paginas(data_inicial=ini, data_final=fim, max_paginas=10)
         dados = resultado.get("dados", [])
-        
         if dados:
             stats = salvar_licitacoes(dados)
-            print(f"[AUTO-SYNC] Sucesso! {len(dados)} licitações processadas. Stats: {stats}")
+            print(f"[AUTO-SYNC] {len(dados)} licitações processadas: {stats}")
         else:
-            print("[AUTO-SYNC] PNCP não retornou dados para o período solicitado.")
+            print("[AUTO-SYNC] Nenhum dado retornado pelo PNCP.")
     except Exception as e:
-        print(f"[AUTO-SYNC] Erro durante a varredura automática: {e}")
+        print(f"[AUTO-SYNC] Erro: {e}")
 
 @app.on_event("startup")
 async def startup():
-    """Configuração inicial ao ligar o servidor."""
     try:
         init_db()
-        # Dispara sincronização em Thread separada para não travar o carregamento do site
-        threading.Thread(target=varredura_startup_silenciosa, daemon=True).start()
-        print("[APP] Servidor e Banco de Dados prontos!")
+        threading.Thread(target=varredura_startup, daemon=True).start()
+        print("[APP] Servidor iniciado!")
     except Exception as e:
-        print(f"[APP] Erro crítico na inicialização: {e}")
+        print(f"[APP] Erro na inicialização: {e}")
 
-# Definição de caminhos do Frontend
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 frontend_path = os.path.join(BASE_DIR, "frontend")
 static_path = os.path.join(frontend_path, "static")
 
-# Monta arquivos estáticos (CSS, JS) se a pasta existir
 if os.path.exists(static_path):
     app.mount("/static", StaticFiles(directory=static_path), name="static")
 
@@ -115,46 +95,55 @@ class BuscaRequest(BaseModel):
     pagina: Optional[int] = 1
     por_pagina: Optional[int] = 50
 
+# ── Status ────────────────────────────────────────────────────────────────────
+@app.get("/api/status")
+async def status():
+    from backend.pncp_client import testar_conexao
+    return {
+        "sistema": "online",
+        "data_servidor": datetime.now().isoformat(),
+        "pncp_api": testar_conexao(),
+        "banco_dados": estatisticas_db(),
+    }
+
 # ── Diagnóstico ───────────────────────────────────────────────────────────────
 @app.get("/api/diagnostico")
-async def executar_diagnostico():
-    """Valida a saúde de toda a infraestrutura."""
+async def diagnostico():
+    import requests as req
     relatorio = {}
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/123.0.0.0"}
-    
+    headers = {"User-Agent": "Mozilla/5.0"}
+    hoje = datetime.now()
+    ini = (hoje - timedelta(days=7)).strftime("%Y%m%d")
+    fim = hoje.strftime("%Y%m%d")
+
     try:
-        requests.get("https://www.google.com", timeout=5)
-        relatorio["1_INTERNET_RAILWAY"] = "OK"
+        req.get("https://www.google.com", timeout=5)
+        relatorio["internet"] = "OK"
     except Exception as e:
-        relatorio["1_INTERNET_RAILWAY"] = f"FALHA ({e})"
-        
+        relatorio["internet"] = f"FALHA: {e}"
+
     try:
-        r = requests.get("https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao", headers=headers, timeout=10)
-        relatorio["2_PNCP_CONEXAO"] = f"OK (HTTP {r.status_code})"
-    except Exception as e:
-        relatorio["2_PNCP_CONEXAO"] = f"FALHA: {e}"
-        
-    try:
-        r = requests.get("https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao?dataInicial=20240301&dataFinal=20240305&codigoModalidadeContratacao=8&pagina=1", headers=headers, timeout=15)
+        r = req.get(
+            "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao",
+            params={"dataInicial": ini, "dataFinal": fim,
+                    "codigoModalidadeContratacao": 8, "pagina": 1, "tamanhoPagina": 5},
+            headers=headers, timeout=15
+        )
         qtd = len(r.json().get("data", []))
-        relatorio["3_PNCP_DADOS"] = f"SUCESSO: {qtd} licitações de 2024 encontradas."
+        relatorio["pncp"] = f"OK — {qtd} licitações encontradas (período: {ini} a {fim})"
     except Exception as e:
-        relatorio["3_PNCP_DADOS"] = f"FALHA NA BUSCA: {e}"
-        
+        relatorio["pncp"] = f"FALHA: {e}"
+
     try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) as t FROM licitacoes")
-        count = cur.fetchone()["t"]
-        relatorio["4_SUPABASE_ESTADO"] = f"SUCESSO: {count} registros no banco."
-        cur.close()
-        conn.close()
+        stats = estatisticas_db()
+        relatorio["banco"] = f"OK — {stats['total_licitacoes']} licitações no banco"
     except Exception as e:
-        relatorio["4_SUPABASE_ESTADO"] = f"FALHA NO BANCO: {e}"
-        
+        relatorio["banco"] = f"FALHA: {e}"
+
+    relatorio["data_servidor"] = hoje.isoformat()
     return relatorio
 
-# ── Rotas de Negócio ──────────────────────────────────────────────────────────
+# ── Busca no banco (instantânea) ──────────────────────────────────────────────
 @app.get("/api/licitacoes")
 async def listar_licitacoes(
     palavras_chave: str = Query(""),
@@ -168,10 +157,6 @@ async def listar_licitacoes(
     pagina: int = Query(1, ge=1),
     por_pagina: int = Query(50, ge=1, le=200),
 ):
-    # Se o frontend enviar datas de 2026, limpamos para permitir busca no banco histórico
-    if data_inicio and "2026" in data_inicio: data_inicio = ""
-    if data_fim and "2026" in data_fim: data_fim = ""
-
     return buscar_licitacoes(
         palavras_chave=palavras_chave, uf=uf, modalidade=modalidade,
         valor_min=valor_min, valor_max=valor_max,
@@ -180,16 +165,17 @@ async def listar_licitacoes(
         pagina=pagina, por_pagina=por_pagina,
     )
 
+# ── Busca ao vivo no PNCP ─────────────────────────────────────────────────────
 @app.post("/api/buscar-pncp")
 async def buscar_pncp_live(req: BuscaRequest):
-    """Busca ao vivo forçada pelo usuário no frontend."""
     from backend.pncp_client import buscar_multiplas_paginas
-    data_ref = obter_data_corrigida()
-    ini = data_ref - timedelta(days=req.dias_atras or 30)
-    
+    hoje = datetime.now()
+    ini = (hoje - timedelta(days=req.dias_atras or 30)).strftime("%Y-%m-%d")
+    fim = hoje.strftime("%Y-%m-%d")
+
     resultado = buscar_multiplas_paginas(
-        data_inicial=ini.strftime("%Y-%m-%d"),
-        data_final=data_ref.strftime("%Y-%m-%d"),
+        data_inicial=ini,
+        data_final=fim,
         uf=req.uf or "",
         modalidade_id=req.modalidade_id,
         palavras_chave=req.palavras_chave or "",
@@ -198,17 +184,16 @@ async def buscar_pncp_live(req: BuscaRequest):
 
     licitacoes = resultado.get("dados", [])
     salvas = salvar_licitacoes(licitacoes) if licitacoes else {"inseridas": 0, "atualizadas": 0}
-    return {"sucesso": True, "coletadas": len(licitacoes), "salvas_db": salvas}
+    return {"sucesso": True, "coletadas": len(licitacoes), "salvas_db": salvas, "licitacoes": licitacoes}
 
+# ── Varredura manual ──────────────────────────────────────────────────────────
 @app.post("/api/varredura-manual")
 async def varredura_manual():
-    """Força uma varredura completa por modalidade."""
     try:
-        data_ref = obter_data_corrigida()
-        ini = (data_ref - timedelta(days=15)).strftime("%Y-%m-%d")
-        fim = data_ref.strftime("%Y-%m-%d")
-        
         from backend.pncp_client import buscar_multiplas_paginas
+        hoje = datetime.now()
+        ini = (hoje - timedelta(days=15)).strftime("%Y-%m-%d")
+        fim = hoje.strftime("%Y-%m-%d")
         res = buscar_multiplas_paginas(data_inicial=ini, data_final=fim, max_paginas=10)
         dados = res.get("dados", [])
         if dados:
@@ -217,19 +202,38 @@ async def varredura_manual():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/status")
-async def status():
-    return {"sistema": "online", "banco_dados": estatisticas_db()}
+# ── Exportar Excel ────────────────────────────────────────────────────────────
+@app.get("/api/exportar")
+async def exportar(
+    palavras_chave: str = Query(""),
+    uf: str = Query(""),
+    modalidade: str = Query(""),
+    valor_min: Optional[float] = Query(None),
+    valor_max: Optional[float] = Query(None),
+    apenas_favoritos: bool = Query(False),
+):
+    resultado = buscar_licitacoes(
+        palavras_chave=palavras_chave, uf=uf, modalidade=modalidade,
+        valor_min=valor_min, valor_max=valor_max,
+        apenas_favoritos=apenas_favoritos,
+        pagina=1, por_pagina=10000,
+    )
+    licitacoes = resultado.get("resultados", [])
+    if not licitacoes:
+        raise HTTPException(status_code=404, detail="Nenhuma licitação para exportar.")
+    caminho = exportar_excel(licitacoes)
+    return FileResponse(
+        path=caminho,
+        filename=os.path.basename(caminho),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
-@app.get("/api/modalidades")
-async def modalidades():
-    from backend.pncp_client import listar_modalidades
-    return listar_modalidades()
-
+# ── Favoritos ─────────────────────────────────────────────────────────────────
 @app.post("/api/favoritos")
 async def gerenciar_favorito(req: FavoritoRequest):
     return toggle_favorito(req.licitacao_id, req.nota)
 
+# ── Filtros Salvos ────────────────────────────────────────────────────────────
 @app.get("/api/filtros")
 async def listar_filtros():
     return listar_filtros_salvos()
@@ -243,11 +247,17 @@ async def remover_filtro(filtro_id: int):
     deletar_filtro(filtro_id)
     return {"sucesso": True}
 
-# ── Rota Raiz (Frontend) ──────────────────────────────────────────────────────
+@app.get("/api/modalidades")
+async def modalidades():
+    from backend.pncp_client import listar_modalidades
+    return listar_modalidades()
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
 @app.get("/", response_class=FileResponse)
 async def serve_frontend():
-    """Serve a página inicial."""
     p = os.path.join(frontend_path, "index.html")
     if os.path.exists(p):
         return FileResponse(p)
-    return JSONResponse(content={"erro": "Frontend não encontrado no servidor"}, status_code=404)
+    return JSONResponse(content={"erro": "Frontend não encontrado"}, status_code=404)
+PYEOF
+echo "OK"
