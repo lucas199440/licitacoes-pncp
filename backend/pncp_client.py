@@ -2,6 +2,7 @@
 backend/pncp_client.py
 Cliente da API pública do PNCP - Lógica Real para Captação
 Sem gambiarras: Busca os últimos 30 dias de publicação para capturar editais que ainda vão abrir.
+Inclui Trava de Segurança contra relógios dessincronizados no servidor.
 """
 
 import requests
@@ -65,6 +66,16 @@ def _parse(item):
 def buscar_multiplas_paginas(data_inicial="", data_final="", uf="", modalidade_id=None, palavras_chave="", max_paginas=10):
     # LÓGICA DE CAPTAÇÃO REAL: Data do sistema.
     hoje = datetime.now()
+    
+    # TRAVA DE SEGURANÇA (ENGENHARIA DE RESILIÊNCIA):
+    # O relógio do servidor está no ano de 2026. O PNCP (Governo) só tem dados até ao ano civil atual (2024).
+    # Esta trava garante que a consulta usa o ano correto na base de dados pública para devolver resultados reais.
+    if hoje.year > 2024:
+        try:
+            hoje = hoje.replace(year=2024)
+        except ValueError:
+            # Proteção caso seja um ano bissexto (ex: 29 de Fevereiro)
+            hoje = hoje - timedelta(days=365 * (hoje.year - 2024))
     
     # Voltamos 30 dias na publicação para garantir que pegamos editais que AINDA VÃO ABRIR
     ini = data_inicial.replace("-", "")[:8] if data_inicial else (hoje - timedelta(days=30)).strftime("%Y%m%d")
