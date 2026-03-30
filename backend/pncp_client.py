@@ -1,7 +1,7 @@
 """
 backend/pncp_client.py
 Motor de Captação Viterbo - Arquitetura Refinada
-Focado em extração robusta sem causar travamentos no servidor.
+Focado em extração robusta, tratamento estrito de erros e anti-bloqueio WAF.
 """
 
 import requests
@@ -12,9 +12,11 @@ class MotorPNCP:
     def __init__(self):
         self.base_url = "https://pncp.gov.br/api/consulta/v1"
         self.session = requests.Session()
+        
+        # User-Agent disfarçado de navegador real para evitar bloqueios do Governo (Cloudflare/Serpro)
         self.session.headers.update({
             "Accept": "application/json",
-            "User-Agent": "ViterboLicitacoes/4.0 (Motor de Captacao)"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
         })
         
         # O Dicionário Sagrado: Os nomes aqui TÊM que ser exatos para o frontend funcionar
@@ -30,16 +32,26 @@ class MotorPNCP:
         }
 
     def _get_seguro(self, url, params):
-        """Faz a requisição com 3 tentativas silenciosas. Timeout de 60s para o PNCP não falhar."""
+        """Faz a requisição com 3 tentativas e valida estritamente o código HTTP para não haver falhas silenciosas."""
         for tentativa in range(1, 4):
             try:
-                resposta = self.session.get(url, params=params, timeout=60)
-                return resposta
+                # Timeout aumentado para 90s, pois o Pregão Eletrónico tem milhares de dados e demora a responder
+                resposta = self.session.get(url, params=params, timeout=90)
+                
+                # Se for sucesso (200) ou sem conteúdo (204), devolve a resposta
+                if resposta.status_code in [200, 204]:
+                    return resposta
+                    
+                print(f"[MOTOR VITERBO] O servidor PNCP devolveu HTTP {resposta.status_code} na tentativa {tentativa}.")
+                resposta.raise_for_status() # Força a exceção para acionar a retentativa
+                
             except requests.exceptions.RequestException as erro:
                 if tentativa == 3:
-                    print(f"[MOTOR VITERBO] Falha na comunicação após 3 tentativas: {erro}")
+                    print(f"[MOTOR VITERBO] ❌ Falha definitiva após 3 tentativas: {erro}")
                     return None
-                time.sleep(3) # Espera 3 segundos antes de tentar de novo
+                print(f"[MOTOR VITERBO] ⚠️ Lentidão no Governo. A aguardar 5 segundos para nova tentativa...")
+                time.sleep(5) 
+        return None
 
     def _limpar_item(self, item):
         """Transforma o JSON confuso do Governo num formato perfeito para a nossa base de dados"""
@@ -85,19 +97,11 @@ def buscar_multiplas_paginas(data_inicial="", data_final="", uf="", modalidade_i
     """Função unificada que atende tanto o Agendador quanto as pesquisas manuais"""
     hoje = datetime.now()
     
-    # TRAVA TEMPORAL DE SEGURANÇA:
-    # Se o relógio do servidor estiver no futuro (ex: 2026), recuamos para 2024 para obter dados reais da API.
-    if hoje.year > 2024:
-        try:
-            hoje = hoje.replace(year=2024)
-        except ValueError:
-            hoje = hoje - timedelta(days=365 * (hoje.year - 2024))
-    
-    # Usa EXATAMENTE as datas fornecidas ou recua 30 dias
-    ini = data_inicial.replace("-", "")[:8] if data_inicial else (hoje - timedelta(days=30)).strftime("%Y%m%d")
+    # Usa EXATAMENTE as datas fornecidas ou recua 15 dias para captar os ativos sem sobrecarregar a API pública
+    ini = data_inicial.replace("-", "")[:8] if data_inicial else (hoje - timedelta(days=15)).strftime("%Y%m%d")
     fim = data_final.replace("-", "")[:8] if data_final else hoje.strftime("%Y%m%d")
     
-    print(f"\n[MOTOR VITERBO] 🚀 A extrair o período real: {ini} até {fim}")
+    print(f"\n[MOTOR VITERBO] 🚀 A extrair o período: {ini} até {fim}")
 
     editais_capturados = []
     
@@ -139,7 +143,7 @@ def buscar_multiplas_paginas(data_inicial="", data_final="", uf="", modalidade_i
                 if pagina >= dados_json.get("totalPaginas", 1):
                     break # Acabaram as páginas disponíveis
             
-            time.sleep(0.5) # Pausa amigável para não ser bloqueado pelo Governo
+            time.sleep(1) # Pausa amigável de 1s para não ser bloqueado pelo Governo
 
     # Aplica o filtro de palavras-chave, se existir
     if palavras_chave and editais_capturados:
@@ -152,9 +156,8 @@ def buscar_multiplas_paginas(data_inicial="", data_final="", uf="", modalidade_i
     print(f"[MOTOR VITERBO] ✅ Captura finalizada! {len(editais_capturados)} editais processados.\n")
     return {"sucesso": True, "dados": editais_capturados, "total_api": len(editais_capturados)}
 
-def varredura_completa(dias=30):
+def varredura_completa(dias=15):
     """Chamado pelo Agendador (background) para alimentar a base de dados."""
-    # A data base e a segurança (fallback) estão agora tratadas dentro do buscar_multiplas_paginas
     return buscar_multiplas_paginas(max_paginas=10)
 
 def listar_modalidades():
