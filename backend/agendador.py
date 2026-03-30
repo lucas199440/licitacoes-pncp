@@ -62,6 +62,6 @@ def iniciar_agendador():
     print("[AGENDADOR] ✅ Agendador iniciado — varredura a cada hora")
 
     # Roda uma vez imediatamente ao subir o servidor
-    varredura_horaria()
+    #varredura_horaria()
 
     return scheduler
