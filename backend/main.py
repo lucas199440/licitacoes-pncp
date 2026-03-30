@@ -1,6 +1,7 @@
 """
 backend/main.py
 Servidor FastAPI para produção (Railway + Supabase).
+Com Sincronização Automática em Background.
 """
 
 import sys, os
@@ -13,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import threading
+import time
 
 from database.db import (
     init_db, salvar_licitacoes, buscar_licitacoes,
@@ -29,6 +32,18 @@ app.add_middleware(
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
+def varredura_startup_silenciosa():
+    """Roda em segundo plano para encher o banco sem travar a tela do usuário"""
+    print("[AUTO-SYNC] Aguardando 10s para o servidor estabilizar...")
+    time.sleep(10)
+    print("[AUTO-SYNC] Iniciando primeira captura de dados em background...")
+    try:
+        from backend.agendador import varredura_horaria
+        varredura_horaria()
+        print("[AUTO-SYNC] Banco preenchido com sucesso! O sistema está pronto.")
+    except Exception as e:
+        print(f"[AUTO-SYNC] Erro: {e}")
+
 # Inicializa banco e agendador ao subir
 @app.on_event("startup")
 async def startup():
@@ -37,6 +52,9 @@ async def startup():
         from backend.agendador import iniciar_agendador
         iniciar_agendador()
         print("[APP] Sistema iniciado com sucesso!")
+        
+        # Dispara a busca num thread isolado (Zero travamento no frontend)
+        threading.Thread(target=varredura_startup_silenciosa, daemon=True).start()
     except Exception as e:
         print(f"[APP] Erro no startup: {e}")
 
@@ -45,7 +63,6 @@ frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 static_path = os.path.join(frontend_path, "static")
 if os.path.exists(static_path):
     app.mount("/static", StaticFiles(directory=static_path), name="static")
-
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class FavoritoRequest(BaseModel):
@@ -71,13 +88,11 @@ class BuscaRequest(BaseModel):
     pagina: Optional[int] = 1
     por_pagina: Optional[int] = 50
 
-
 # ── Frontend ──────────────────────────────────────────────────────────────────
 @app.get("/", response_class=FileResponse)
 async def serve_frontend():
     p = os.path.join(frontend_path, "index.html")
     return FileResponse(p) if os.path.exists(p) else JSONResponse({"ok": True})
-
 
 # ── Status ────────────────────────────────────────────────────────────────────
 @app.get("/api/status")
@@ -89,7 +104,6 @@ async def status():
         "banco_dados": estatisticas_db(),
         "timestamp": datetime.now().isoformat(),
     }
-
 
 # ── Busca no banco local (rápida — PostgreSQL com full-text) ──────────────────
 @app.get("/api/licitacoes")
@@ -113,7 +127,6 @@ async def listar_licitacoes(
         apenas_favoritos=apenas_favoritos,
         pagina=pagina, por_pagina=por_pagina,
     )
-
 
 # ── Busca ao vivo no PNCP (quando usuário quer dados frescos) ─────────────────
 @app.post("/api/buscar-pncp")
@@ -147,7 +160,6 @@ async def buscar_pncp_live(req: BuscaRequest):
         "licitacoes": licitacoes,
     }
 
-
 # ── Exportar Excel ────────────────────────────────────────────────────────────
 @app.get("/api/exportar")
 async def exportar(
@@ -174,12 +186,10 @@ async def exportar(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-
 # ── Favoritos ─────────────────────────────────────────────────────────────────
 @app.post("/api/favoritos")
 async def gerenciar_favorito(req: FavoritoRequest):
     return toggle_favorito(req.licitacao_id, req.nota)
-
 
 # ── Filtros Salvos ────────────────────────────────────────────────────────────
 @app.get("/api/filtros")
@@ -195,7 +205,6 @@ async def remover_filtro(filtro_id: int):
     deletar_filtro(filtro_id)
     return {"sucesso": True}
 
-
 # ── Utilitários ───────────────────────────────────────────────────────────────
 @app.get("/api/modalidades")
 async def modalidades():
@@ -207,7 +216,7 @@ async def estatisticas():
 
 @app.post("/api/varredura-manual")
 async def varredura_manual():
-    """Dispara uma varredura manual do PNCP (últimos 2 dias)."""
+    """Dispara uma varredura manual do PNCP."""
     try:
         from backend.agendador import varredura_horaria
         varredura_horaria()
