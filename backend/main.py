@@ -1,4 +1,3 @@
-cat > /home/claude/licitacao-online/backend/main.py << 'PYEOF'
 """
 backend/main.py
 Servidor FastAPI para produção (Railway + Supabase).
@@ -259,5 +258,3 @@ async def serve_frontend():
     if os.path.exists(p):
         return FileResponse(p)
     return JSONResponse(content={"erro": "Frontend não encontrado"}, status_code=404)
-PYEOF
-echo "OK"
