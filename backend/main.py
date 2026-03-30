@@ -1,7 +1,7 @@
 """
 backend/main.py
 Servidor FastAPI para produção (Railway + Supabase).
-Sincronização Direta Integrada (Sem dependência de Agendadores externos).
+Sincronização Direta Integrada com Scanner de Diagnóstico Profundo.
 """
 
 import sys, os
@@ -16,11 +16,12 @@ from typing import Optional
 from datetime import datetime
 import threading
 import time
+import requests
 
 from database.db import (
     init_db, salvar_licitacoes, buscar_licitacoes,
     toggle_favorito, salvar_filtro, listar_filtros_salvos,
-    deletar_filtro, estatisticas_db
+    deletar_filtro, estatisticas_db, get_conn
 )
 from backend.exportador import exportar_excel
 
@@ -91,40 +92,57 @@ class BuscaRequest(BaseModel):
     pagina: Optional[int] = 1
     por_pagina: Optional[int] = 50
 
-# ── ROTA DE EMERGÊNCIA (O TESTE DA VERDADE) ──────────────────────────────────
-@app.get("/api/emergencia")
-async def emergencia_db():
+# ── ROTA DE DIAGNÓSTICO PROFUNDO (A NOSSA NOVA LINHA DE INVESTIGAÇÃO) ────────
+@app.get("/api/diagnostico")
+async def executar_diagnostico():
     """
-    Quando aceder a esta rota pelo navegador, o sistema força a captação
-    e exibe EXATAMENTE o que está a correr mal na tela.
+    Testa cada um dos elos da corrente (Governo -> Railway -> Supabase)
+    para descobrir exatamente onde a informação se perde.
     """
+    relatorio = {}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/123.0.0.0"}
+
+    # 1. Teste de Internet do Servidor
     try:
-        from backend.pncp_client import buscar_multiplas_paginas
-        
-        # 1. Puxa só as primeiras páginas para ser rápido
-        res_api = buscar_multiplas_paginas(max_paginas=2)
-        dados = res_api.get("dados", [])
-        
-        if not dados:
-            return {
-                "STATUS": "ERRO_GOVERNO", 
-                "MOTIVO": "O código chegou ao PNCP, mas o Governo devolveu ZERO resultados. É provável que o IP do Railway esteja bloqueado pelo WAF do PNCP."
-            }
-            
-        # 2. Grava no banco
-        res_banco = salvar_licitacoes(dados)
-        
-        # 3. Lê do banco
-        estatisticas = estatisticas_db()
-        
-        return {
-            "STATUS": "SUCESSO_TOTAL",
-            "LICITACOES_BAIXADAS_AGORA": len(dados),
-            "RESULTADO_GRAVACAO_SUPABASE": res_banco,
-            "TOTAL_NA_BASE_DE_DADOS": estatisticas.get("total_licitacoes")
-        }
+        requests.get("https://www.google.com", timeout=5)
+        relatorio["1_INTERNET_RAILWAY"] = "OK"
     except Exception as e:
-        return {"STATUS": "ERRO_NO_CODIGO", "DETALHE": str(e)}
+        relatorio["1_INTERNET_RAILWAY"] = f"FALHA ({e})"
+
+    # 2. Teste de Acesso à API do Governo (Bloqueio de IP / Firewall)
+    try:
+        r = requests.get("https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao", headers=headers, timeout=10)
+        relatorio["2_PNCP_CONEXAO"] = f"OK (HTTP {r.status_code})"
+    except Exception as e:
+        relatorio["2_PNCP_CONEXAO"] = f"FALHA (O Governo pode estar a bloquear o seu servidor Railway): {e}"
+
+    # 3. Teste de Dados do PNCP (Ignorando datas do sistema e forçando Março de 2024)
+    try:
+        r = requests.get(
+            "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao?dataInicial=20240301&dataFinal=20240305&codigoModalidadeContratacao=8&pagina=1",
+            headers=headers, timeout=15
+        )
+        if r.status_code == 200:
+            qtd = len(r.json().get("data", []))
+            relatorio["3_PNCP_DADOS"] = f"SUCESSO: Trouxe {qtd} licitações de 2024 da API."
+        else:
+            relatorio["3_PNCP_DADOS"] = f"AVISO: O Governo respondeu com código {r.status_code}. (Vazio)"
+    except Exception as e:
+        relatorio["3_PNCP_DADOS"] = f"FALHA AO LER DADOS: {e}"
+
+    # 4. Teste de Escrita e Leitura do Supabase
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) as t FROM licitacoes")
+        count = cur.fetchone()["t"]
+        relatorio["4_SUPABASE_ESTADO"] = f"SUCESSO: Acesso total à base de dados. Tabela tem {count} registros."
+        cur.close()
+        conn.close()
+    except Exception as e:
+        relatorio["4_SUPABASE_ESTADO"] = f"FALHA NA BASE DE DADOS: {e}"
+
+    return relatorio
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 @app.get("/", response_class=FileResponse)
@@ -187,7 +205,7 @@ async def buscar_pncp_live(req: BuscaRequest):
         "licitacoes": licitacoes,
     }
 
-# ── Varredura Manual (Ignora o Agendador Antigo) ──────────────────────────────
+# ── Varredura Manual ──────────────────────────────────────────────────────────
 @app.post("/api/varredura-manual")
 async def varredura_manual():
     """Dispara uma varredura manual DIRETA."""
